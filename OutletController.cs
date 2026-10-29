@@ -1,6 +1,6 @@
 namespace OnAir;
 
-/// <summary>Switches the configured set of Govee outlets together.</summary>
+/// <summary>Switches the configured Govee outlets.</summary>
 sealed class OutletController(GoveeClient govee, IReadOnlyList<OutletConfig> outlets)
 {
     public bool IsResolved { get; private set; }
@@ -41,9 +41,12 @@ sealed class OutletController(GoveeClient govee, IReadOnlyList<OutletConfig> out
     }
 
     /// <summary>Turns every outlet on or off. Returns false if any outlet failed.</summary>
-    public async Task<bool> SetAsync(bool on, CancellationToken ct)
+    public Task<bool> SetAllAsync(bool on, CancellationToken ct) => SetAsync(outlets, on, ct);
+
+    /// <summary>Turns the given outlets on or off. Returns false if any outlet failed.</summary>
+    public async Task<bool> SetAsync(IEnumerable<OutletConfig> targets, bool on, CancellationToken ct)
     {
-        var results = await Task.WhenAll(outlets.Select(async o =>
+        var results = await Task.WhenAll(targets.Select(async o =>
         {
             try
             {

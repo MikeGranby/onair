@@ -55,14 +55,14 @@ static class Program
     static int Usage()
     {
         Console.WriteLine("""
-            OnAir - turns Govee outlets on while the microphone is in use.
+            OnAir - turns Govee outlets on while the microphone or camera is in use.
 
             Usage:
-              OnAir                 Run in the notification area (right-click the icon for Auto/On/Off)
+              OnAir                 Run in the notification area (right-click the icon to force a level)
               OnAir --stop          Stop the running app, turning the outlets off
-              OnAir --status        Show which apps are using the microphone right now
+              OnAir --status        Show which apps are using the microphone and camera right now
               OnAir --list-devices  List the Govee devices on your account
-              OnAir --on | --off    Switch the configured outlets once, to test
+              OnAir --on | --off    Switch all configured outlets once, to test
 
             Settings are read from appsettings.json next to OnAir.exe; the log is OnAir.log.
             """);
@@ -96,16 +96,19 @@ static class Program
 
     static int Status(AppConfig config)
     {
-        using var mic = new MicrophoneMonitor();
-        var apps = mic.GetInUseApps();
-        if (apps.Count == 0)
+        using var devices = new DeviceMonitor();
+        foreach (var device in Enum.GetValues<CaptureDevice>())
         {
-            Console.WriteLine("The microphone is not in use.");
-            return 0;
+            var apps = devices.GetInUseApps(device);
+            if (apps.Count == 0)
+            {
+                Console.WriteLine($"{device}: not in use.");
+                continue;
+            }
+            Console.WriteLine($"{device} in use by:");
+            foreach (var app in apps)
+                Console.WriteLine($"  {app}{(config.IsExcluded(app) ? "  (excluded)" : "")}");
         }
-        Console.WriteLine("Microphone in use by:");
-        foreach (var app in apps)
-            Console.WriteLine($"  {app}{(config.IsExcluded(app) ? "  (excluded)" : "")}");
         return 0;
     }
 
@@ -135,7 +138,7 @@ static class Program
         using var govee = new GoveeClient(config.RequireApiKey());
         var outlets = new OutletController(govee, config.Outlets);
         await outlets.ResolveAsync(CancellationToken.None);
-        bool ok = await outlets.SetAsync(on, CancellationToken.None);
+        bool ok = await outlets.SetAllAsync(on, CancellationToken.None);
         Console.WriteLine(ok ? $"Outlets turned {(on ? "on" : "off")}." : "One or more outlets failed.");
         return ok ? 0 : 1;
     }

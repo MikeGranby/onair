@@ -6,43 +6,54 @@ using Microsoft.Win32.SafeHandles;
 
 namespace OnAir;
 
+enum CaptureDevice { Microphone, Camera }
+
 /// <summary>
-/// Detects microphone use from the CapabilityAccessManager consent store. Windows keeps a key per
-/// app with LastUsedTimeStart/LastUsedTimeStop FILETIME values; while an app holds the microphone,
-/// LastUsedTimeStop is 0. Desktop (non-packaged) apps live under a "NonPackaged" subkey, named by
-/// their exe path with '\' replaced by '#'.
+/// Detects microphone and camera use from the CapabilityAccessManager consent store. Windows keeps
+/// a key per app with LastUsedTimeStart/LastUsedTimeStop FILETIME values; while an app holds the
+/// device, LastUsedTimeStop is 0. Desktop (non-packaged) apps live under a "NonPackaged" subkey,
+/// named by their exe path with '\' replaced by '#'.
 /// </summary>
-sealed class MicrophoneMonitor : IDisposable
+sealed class DeviceMonitor : IDisposable
 {
-    const string ConsentStorePath = @"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\microphone";
+    const string ConsentStorePath = @"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\";
+
+    static readonly (CaptureDevice Device, string Capability)[] Capabilities =
+    [
+        (CaptureDevice.Microphone, "microphone"),
+        (CaptureDevice.Camera, "webcam"),
+    ];
 
     const int RegNotifyChangeName = 0x1;
     const int RegNotifyChangeLastSet = 0x4;
     const int RegNotifyThreadAgnostic = 0x10000000;
 
-    readonly List<(RegistryKey Key, AutoResetEvent Changed)> _roots = [];
+    readonly List<(CaptureDevice Device, RegistryKey Key, AutoResetEvent Changed)> _roots = [];
 
-    public MicrophoneMonitor()
+    public DeviceMonitor()
     {
-        foreach (var hive in new[] { Registry.CurrentUser, Registry.LocalMachine })
+        foreach (var (device, capability) in Capabilities)
         {
-            var key = hive.OpenSubKey(ConsentStorePath);
-            if (key == null)
-                continue;
-            var changed = new AutoResetEvent(false);
-            Arm(key, changed);
-            _roots.Add((key, changed));
+            foreach (var hive in new[] { Registry.CurrentUser, Registry.LocalMachine })
+            {
+                var key = hive.OpenSubKey(ConsentStorePath + capability);
+                if (key == null)
+                    continue;
+                var changed = new AutoResetEvent(false);
+                Arm(key, changed);
+                _roots.Add((device, key, changed));
+            }
         }
         if (_roots.Count == 0)
-            throw new InvalidOperationException("The microphone consent store was not found in the registry (requires Windows 10 1903 or later).");
+            throw new InvalidOperationException("The device consent store was not found in the registry (requires Windows 10 1903 or later).");
     }
 
-    /// <summary>Apps currently holding the microphone: package family names, or exe paths for desktop apps.</summary>
-    public IReadOnlyList<string> GetInUseApps()
+    /// <summary>Apps currently holding the device: package family names, or exe paths for desktop apps.</summary>
+    public IReadOnlyList<string> GetInUseApps(CaptureDevice device)
     {
         var apps = new List<string>();
-        foreach (var (key, _) in _roots)
-            Scan(key, apps, nonPackaged: false);
+        foreach (var root in _roots.Where(r => r.Device == device))
+            Scan(root.Key, apps, nonPackaged: false);
         return apps.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
     }
 
@@ -107,7 +118,7 @@ sealed class MicrophoneMonitor : IDisposable
 
     public void Dispose()
     {
-        foreach (var (key, changed) in _roots)
+        foreach (var (_, key, changed) in _roots)
         {
             key.Dispose();
             changed.Dispose();

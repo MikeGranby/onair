@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace OnAir;
 
@@ -10,6 +11,9 @@ sealed class OutletConfig
     public string? Sku { get; set; }
     public string? Device { get; set; }
     public string Instance { get; set; } = "powerSwitch";
+
+    // On only at this level (Audio or Video); null = on at either.
+    public OnAirLevel? Level { get; set; }
 
     // Govee capability type; filled in from the device list, or defaulted from Instance.
     public string? Type { get; set; }
@@ -34,6 +38,7 @@ sealed class AppConfig
         PropertyNameCaseInsensitive = true,
         ReadCommentHandling = JsonCommentHandling.Skip,
         AllowTrailingCommas = true,
+        Converters = { new JsonStringEnumConverter() },   // accepts "Video" or 2
     };
 
     public static AppConfig Load(string path) =>
@@ -56,8 +61,12 @@ sealed class AppConfig
         if (Outlets.Count == 0)
             throw new ConfigException($"No outlets configured. Add them to \"Outlets\" in {FileName}.");
         foreach (var o in Outlets)
+        {
             if (string.IsNullOrWhiteSpace(o.Name) && (string.IsNullOrWhiteSpace(o.Sku) || string.IsNullOrWhiteSpace(o.Device)))
                 throw new ConfigException($"Each outlet in {FileName} needs a \"Name\", or both \"Sku\" and \"Device\".");
+            if (o.Level is not (null or OnAirLevel.Audio or OnAirLevel.Video))
+                throw new ConfigException($"\"Level\" for outlet \"{o.Label}\" in {FileName} must be 1 (Audio) or 2 (Video), or left out.");
+        }
     }
 
     public bool IsExcluded(string app) =>
